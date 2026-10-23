@@ -3,6 +3,7 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 jobs:
   test:
@@ -23,18 +24,58 @@ jobs:
           sudo install -m 755 restic /usr/local/bin/restic
 
       - name: Vet
-        run: go vet ./...
+        run: |
+          go vet ./...
+          GOOS=freebsd go vet ./...
 
       - name: Test
         run: go test -count=1 ./...
 
-      - name: Validate compose file
+      - name: Validate compose files
         run: |
           printf 'DOMAIN=example.org\nMARIADB_ROOT_PASSWORD=x\n' > /tmp/ci.env
-          docker compose -f internal/stack/files/stack/compose.yaml --env-file /tmp/ci.env config --quiet
+          for os in linux freebsd; do
+            docker compose -f internal/stack/files/stack/$os/compose.yaml --env-file /tmp/ci.env config --quiet
+          done
 
       - name: Build for Linux and FreeBSD
         run: |
           for target in linux/amd64 linux/arm64 freebsd/amd64 freebsd/arm64; do
             GOOS=${target%/*} GOARCH=${target#*/} go build -o /dev/null ./cmd/frostfire
           done
+
+  # The real thing on Linux: setup, up, backup, break, restore.
+  e2e-linux:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build
+        run: go build -o frostfire ./cmd/frostfire && sudo install -m 755 frostfire /usr/local/bin/frostfire
+      - name: End to end (Docker)
+        run: sudo FROSTFIRE_ENGINE=docker sh ci/e2e.sh
+
+  # The same test inside a real FreeBSD VM, with Podman, pf and FreeBSD-native images.
+  e2e-freebsd:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - name: End to end (FreeBSD 15.0, Podman)
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: "15.0"
+          usesh: true
+          mem: 8192
+          prepare: |
+            pkg install -y go curl
+          run: |
+            set -e
+            go test -count=1 ./...
+            go build -o /usr/local/bin/frostfire ./cmd/frostfire
+            sh ci/e2e.sh

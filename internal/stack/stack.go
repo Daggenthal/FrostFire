@@ -24,14 +24,45 @@ func EnvExample() []byte {
 	return b
 }
 
-// WriteStack replaces root/stack with the embedded stack files. That directory is
-// owned by frostfire, so anything edited there by hand is overwritten.
-func WriteStack(root string) error {
+// Images are the locally built images for an OS, in build order, mapped to their
+// build directory under root/stack. Linux uses upstream images except for PHP,
+// which compose builds itself.
+func Images(goos string) []string {
+	if goos == "freebsd" {
+		return []string{"db", "cache", "php", "web", "certbot"}
+	}
+	return nil
+}
+
+// ImageDir is the build directory for a locally built image.
+func ImageDir(root, name string) string {
+	return filepath.Join(root, "stack", "images", name)
+}
+
+// WriteStack replaces root/stack with the embedded stack for goos ("linux" or
+// "freebsd"). That directory is owned by frostfire, so hand edits are overwritten.
+func WriteStack(root, goos string) error {
+	src := "files/stack/" + goos
+	if _, err := fs.Stat(files, src); err != nil {
+		return fmt.Errorf("no container stack for %s", goos)
+	}
 	dir := filepath.Join(root, "stack")
 	if err := os.RemoveAll(dir); err != nil {
 		return err
 	}
-	return copyTree("files/stack", dir, true)
+	if err := copyTree(src, dir, true); err != nil {
+		return err
+	}
+	// The PHP entrypoint is shared by both OSes.
+	phpDir := filepath.Join(dir, "php")
+	if goos == "freebsd" {
+		phpDir = ImageDir(root, "php")
+	}
+	entry, err := files.ReadFile("files/shared/php-entrypoint.sh")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(phpDir, "entrypoint.sh"), entry, 0o755)
 }
 
 // WriteConfigDefaults copies the default config files into root/config, skipping

@@ -7,10 +7,20 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"runtime"
 	"strings"
 
 	"github.com/Daggenthal/FrostFire/internal/config"
+)
+
+// Tools frostfire may need to install.
+const (
+	ToolPodman        = "podman"
+	ToolPodmanCompose = "podman-compose"
+	ToolDocker        = "docker"
+	ToolDockerCompose = "docker-compose"
+	ToolRestic        = "restic"
 )
 
 // Platform describes how to install software on one OS family.
@@ -21,20 +31,25 @@ type Platform struct {
 	Prepare  [][]string        // extra one-time steps, e.g. enabling EPEL (optional)
 	Install  []string          // install command; package names are appended
 	Env      []string          // extra environment for package commands
-	Packages map[string]string // tool name -> package name
+	Packages map[string]string // tool -> package; a missing tool isn't packaged here
+	Init     string            // service manager: systemd, openrc, rc (FreeBSD)
 }
+
+// Has reports whether tool can be installed from this platform's packages.
+func (p Platform) Has(tool string) bool { return p.Packages[tool] != "" }
 
 type family struct {
 	matches  []string // os-release IDs that belong to this family
 	platform Platform
 }
 
-// Tools frostfire may need to install.
-const (
-	ToolPodman  = "podman"
-	ToolCompose = "podman-compose"
-	ToolRestic  = "restic"
-)
+func pkgs(extra map[string]string) map[string]string {
+	m := map[string]string{ToolPodman: "podman", ToolPodmanCompose: "podman-compose", ToolRestic: "restic"}
+	for k, v := range extra {
+		m[k] = v
+	}
+	return m
+}
 
 var families = []family{
 	{[]string{"debian", "ubuntu", "raspbian"}, Platform{
@@ -42,51 +57,81 @@ var families = []family{
 		Refresh:  []string{"apt-get", "update"},
 		Install:  []string{"apt-get", "install", "-y"},
 		Env:      []string{"DEBIAN_FRONTEND=noninteractive"},
-		Packages: map[string]string{ToolPodman: "podman", ToolCompose: "podman-compose", ToolRestic: "restic"},
+		Packages: pkgs(map[string]string{ToolDocker: "docker.io", ToolDockerCompose: "docker-compose"}),
+		Init:     "systemd",
 	}},
 	{[]string{"fedora"}, Platform{
 		Family:   "fedora",
 		Install:  []string{"dnf", "install", "-y"},
-		Packages: map[string]string{ToolPodman: "podman", ToolCompose: "podman-compose", ToolRestic: "restic"},
+		Packages: pkgs(map[string]string{ToolDocker: "moby-engine", ToolDockerCompose: "docker-compose"}),
+		Init:     "systemd",
 	}},
 	{[]string{"rhel", "centos", "rocky", "almalinux", "ol"}, Platform{
 		Family: "rhel",
-		// podman-compose and restic live in EPEL on the RHEL family.
+		// podman-compose and restic live in EPEL. Docker isn't packaged on the RHEL family.
 		Prepare:  [][]string{{"dnf", "install", "-y", "epel-release"}},
 		Install:  []string{"dnf", "install", "-y"},
-		Packages: map[string]string{ToolPodman: "podman", ToolCompose: "podman-compose", ToolRestic: "restic"},
+		Packages: pkgs(nil),
+		Init:     "systemd",
 	}},
 	{[]string{"arch", "archarm", "manjaro", "endeavouros"}, Platform{
 		Family:   "arch",
 		Install:  []string{"pacman", "-S", "--needed", "--noconfirm"},
-		Packages: map[string]string{ToolPodman: "podman", ToolCompose: "podman-compose", ToolRestic: "restic"},
+		Packages: pkgs(map[string]string{ToolDocker: "docker", ToolDockerCompose: "docker-compose"}),
+		Init:     "systemd",
 	}},
 	{[]string{"suse", "opensuse", "opensuse-leap", "opensuse-tumbleweed", "sles"}, Platform{
 		Family:   "suse",
 		Refresh:  []string{"zypper", "--non-interactive", "refresh"},
 		Install:  []string{"zypper", "--non-interactive", "install"},
-		Packages: map[string]string{ToolPodman: "podman", ToolCompose: "podman-compose", ToolRestic: "restic"},
+		Packages: pkgs(map[string]string{ToolDocker: "docker", ToolDockerCompose: "docker-compose"}),
+		Init:     "systemd",
 	}},
 	{[]string{"alpine"}, Platform{
 		Family:   "alpine",
 		Install:  []string{"apk", "add", "--no-cache"},
-		Packages: map[string]string{ToolPodman: "podman", ToolCompose: "podman-compose", ToolRestic: "restic"},
+		Packages: pkgs(map[string]string{ToolDocker: "docker", ToolDockerCompose: "docker-cli-compose"}),
+		Init:     "openrc",
 	}},
 }
 
-// ErrFreeBSD is returned on FreeBSD until its backend lands.
-var ErrFreeBSD = errors.New("FreeBSD is detected, but its backend isn't ready yet (Linux first, FreeBSD next)")
+// FreeBSD installs by port origin, so the current Python flavor of podman-compose
+// (py311, py312, ...) is picked automatically instead of being hardcoded.
+var freebsd = Platform{
+	Family:  "freebsd",
+	Install: []string{"pkg", "install", "-y"},
+	Env:     []string{"ASSUME_ALWAYS_YES=yes"},
+	Packages: map[string]string{
+		ToolPodman:        "sysutils/podman-suite",
+		ToolPodmanCompose: "sysutils/podman-compose",
+		ToolRestic:        "sysutils/restic",
+	},
+	Init: "rc",
+}
+
+// ForFreeBSD returns the FreeBSD platform (for planning on other OSes, e.g. in tests).
+func ForFreeBSD() Platform {
+	p := freebsd
+	p.Name = "FreeBSD"
+	return p
+}
 
 // Detect identifies the running OS.
 func Detect() (Platform, error) {
-	if runtime.GOOS == "freebsd" {
-		return Platform{Name: "FreeBSD", Family: "freebsd"}, ErrFreeBSD
+	switch runtime.GOOS {
+	case "freebsd":
+		p := freebsd
+		p.Name = "FreeBSD"
+		if out, err := exec.Command("freebsd-version").Output(); err == nil {
+			p.Name += " " + strings.TrimSpace(string(out))
+		}
+		return p, nil
+	case "linux":
+	default:
+		return Platform{}, fmt.Errorf("%s is not supported (FrostFire runs on Linux and FreeBSD)", runtime.GOOS)
 	}
-	if runtime.GOOS != "linux" {
-		return Platform{}, fmt.Errorf("%s is not supported (FrostFire runs on Linux, FreeBSD is next)", runtime.GOOS)
-	}
-	for _, p := range []string{"/etc/os-release", "/usr/lib/os-release"} {
-		f, err := os.Open(p)
+	for _, path := range []string{"/etc/os-release", "/usr/lib/os-release"} {
+		f, err := os.Open(path)
 		if err != nil {
 			continue
 		}
@@ -112,11 +157,17 @@ func FromOSRelease(r io.Reader) (Platform, error) {
 	for _, id := range ids {
 		for _, fam := range families {
 			for _, m := range fam.matches {
-				if id == m {
-					p := fam.platform
-					p.Name = name
-					return p, nil
+				if id != m {
+					continue
 				}
+				p := fam.platform
+				p.Name = name
+				p.Packages = pkgs(p.Packages) // copy, so tweaks don't leak into the table
+				// Ubuntu's plain docker-compose is the old Python 1.x; v2 has its own package.
+				if p.Family == "debian" && contains(ids, "ubuntu") {
+					p.Packages[ToolDockerCompose] = "docker-compose-v2"
+				}
+				return p, nil
 			}
 		}
 	}
@@ -139,4 +190,40 @@ func (p Platform) InstallCommands(tools []string) [][]string {
 		install = append(install, p.Packages[t])
 	}
 	return append(cmds, install)
+}
+
+// FreeBSDImageVersion returns the freebsd-runtime image tag to build from. A jail
+// can't run a newer userland than the host kernel, so it follows the host:
+// 15.0-RELEASE-p3 uses "15.0", and -STABLE or -CURRENT use the "15.snap" snapshots.
+func FreeBSDImageVersion(override string) (string, error) {
+	if override != "" {
+		return override, nil
+	}
+	out, err := exec.Command("freebsd-version", "-k").Output()
+	if err != nil {
+		return "", fmt.Errorf("running freebsd-version: %w", err)
+	}
+	return ParseFreeBSDVersion(strings.TrimSpace(string(out)))
+}
+
+// ParseFreeBSDVersion maps a freebsd-version string to an image tag.
+func ParseFreeBSDVersion(v string) (string, error) {
+	num, branch, ok := strings.Cut(v, "-")
+	major, _, hasMinor := strings.Cut(num, ".")
+	if !ok || !hasMinor || major == "" {
+		return "", fmt.Errorf("unexpected FreeBSD version %q (set FREEBSD_IMAGE_VERSION in frostfire.env)", v)
+	}
+	if strings.HasPrefix(branch, "RELEASE") {
+		return num, nil
+	}
+	return major + ".snap", nil
+}
+
+func contains(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }

@@ -46,9 +46,25 @@ func (a *App) Doctor(ctx context.Context) error {
 
 	bin, err := engine.Detect(a.Cfg.Get("FROSTFIRE_ENGINE", ""))
 	if err != nil {
-		check(false, "container engine", err.Error()+" (run `frostfire setup`)")
+		check(false, "container engine", err.Error())
 	} else {
 		check(true, "container engine", bin+" compose")
+	}
+
+	if a.OS == "freebsd" {
+		h := realHost{}
+		mounts, _ := h.Output("mount", "-t", "fdescfs")
+		check(strings.Contains(mounts, "/dev/fd"), "fdescfs on /dev/fd", "")
+		check(h.Probe("service", "pf", "status"), "pf running", "")
+		pf, _ := h.ReadFile(pfConf)
+		check(strings.Contains(string(pf), "cni-rdr"), "pf.conf has Podman's anchors", "")
+		fl, _ := h.Output("sysctl", "-n", "net.pf.filter_local")
+		check(strings.TrimSpace(fl) == "1", "net.pf.filter_local=1", "")
+		pe, _ := h.Output("sysrc", "-n", "podman_enable")
+		check(strings.TrimSpace(pe) == "YES", "containers restart on boot (podman_enable)", "")
+		if failed > 0 {
+			fmt.Fprintln(a.Stdout, "      FreeBSD host prep is incomplete: run `frostfire setup`")
+		}
 	}
 
 	if rs, err := a.backupRepo(); err != nil {

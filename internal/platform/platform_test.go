@@ -59,3 +59,29 @@ func TestInstallCommands(t *testing.T) {
 		t.Fatal("expected no commands when nothing is missing")
 	}
 }
+
+func TestParseFreeBSDVersion(t *testing.T) {
+	for in, want := range map[string]string{
+		"15.0-RELEASE-p3": "15.0",
+		"14.4-RELEASE":    "14.4",
+		"15.1-STABLE":     "15.snap",
+		"16.0-CURRENT":    "16.snap",
+		"15.1-RC2":        "15.snap",
+	} {
+		got, err := ParseFreeBSDVersion(in)
+		if err != nil || got != want {
+			t.Errorf("%s: got %q, %v; want %q", in, got, err, want)
+		}
+	}
+	if _, err := ParseFreeBSDVersion("garbage"); err == nil {
+		t.Error("expected an error")
+	}
+}
+
+func TestUbuntuDockerComposePackage(t *testing.T) {
+	u, _ := FromOSRelease(strings.NewReader("ID=ubuntu\nID_LIKE=debian"))
+	d, _ := FromOSRelease(strings.NewReader("ID=debian"))
+	if u.Packages[ToolDockerCompose] != "docker-compose-v2" || d.Packages[ToolDockerCompose] != "docker-compose" {
+		t.Fatalf("ubuntu=%s debian=%s", u.Packages[ToolDockerCompose], d.Packages[ToolDockerCompose])
+	}
+}

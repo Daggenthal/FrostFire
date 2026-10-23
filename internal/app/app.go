@@ -12,11 +12,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
 	"github.com/Daggenthal/FrostFire/internal/config"
 	"github.com/Daggenthal/FrostFire/internal/engine"
+	"github.com/Daggenthal/FrostFire/internal/platform"
 	"github.com/Daggenthal/FrostFire/internal/restic"
 	"github.com/Daggenthal/FrostFire/internal/stack"
 )
@@ -32,6 +34,7 @@ const dbDumpName = "frostfire-db.sql"
 
 type App struct {
 	Root   string
+	OS     string // "linux" or "freebsd": which container stack to run
 	Cfg    *config.Config
 	Stdin  io.Reader
 	Stdout io.Writer
@@ -43,7 +46,7 @@ type App struct {
 
 // New creates an App for root. Settings are loaded lazily so `init` works on an empty root.
 func New(root string) *App {
-	return &App{Root: root, Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}
+	return &App{Root: root, OS: runtime.GOOS, Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}
 }
 
 func (a *App) step(format string, args ...any) {
@@ -78,6 +81,13 @@ func (a *App) engine() (*engine.Compose, error) {
 		return nil, err
 	}
 	a.compose = &engine.Compose{Bin: bin, Root: a.Root, Stdout: a.Stdout, Stderr: a.Stderr}
+	if a.OS == "freebsd" {
+		v, err := platform.FreeBSDImageVersion(a.Cfg.Get("FREEBSD_IMAGE_VERSION", ""))
+		if err != nil {
+			return nil, err
+		}
+		a.compose.Env = []string{"FREEBSD_VERSION=" + v}
+	}
 	return a.compose, nil
 }
 
@@ -156,21 +166,45 @@ func (a *App) Up(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := a.writeStack(); err != nil {
+	if err := a.prepare(ctx); err != nil {
 		return err
 	}
 	a.step("Starting the stack")
-	return c.Run(ctx, "up", "--detach", "--build", "--remove-orphans")
+	args := []string{"up", "--detach", "--remove-orphans"}
+	if len(stack.Images(a.OS)) == 0 {
+		args = append(args, "--build") // Linux: compose builds the PHP image itself
+	}
+	return c.Run(ctx, args...)
 }
 
-func (a *App) writeStack() error {
+// prepare writes the stack files for this OS and, where images are built locally
+// (FreeBSD), builds them. Builds are cached, so this is quick after the first time.
+func (a *App) prepare(ctx context.Context) error {
+	c, err := a.engine()
+	if err != nil {
+		return err
+	}
 	for _, d := range dataDirs {
 		if err := os.MkdirAll(filepath.Join(a.Root, d), 0o755); err != nil {
 			return err
 		}
 	}
-	if err := stack.WriteStack(a.Root); err != nil {
+	if err := stack.WriteStack(a.Root, a.OS); err != nil {
 		return fmt.Errorf("writing stack files: %w", err)
+	}
+	if images := stack.Images(a.OS); len(images) > 0 {
+		args := map[string]string{}
+		for _, kv := range c.Env {
+			if k, v, ok := strings.Cut(kv, "="); ok && k == "FREEBSD_VERSION" {
+				args[k] = v
+			}
+		}
+		for _, name := range images {
+			a.step("Building image %s", name)
+			if err := c.Build(ctx, "localhost/frostfire-"+name+":latest", stack.ImageDir(a.Root, name), args); err != nil {
+				return err
+			}
+		}
 	}
 	if _, err := stack.WriteConfigDefaults(a.Root); err != nil {
 		return err
@@ -236,7 +270,7 @@ func (a *App) IssueCert(ctx context.Context) error {
 	}
 
 	a.step("Making sure nginx is answering ACME challenges")
-	if err := a.writeStack(); err != nil {
+	if err := a.prepare(ctx); err != nil {
 		return err
 	}
 	if err := c.Run(ctx, "up", "--detach", "web"); err != nil {
@@ -368,7 +402,7 @@ func (a *App) ensureDB(ctx context.Context) error {
 		return nil
 	}
 	a.step("Starting MariaDB")
-	if err := a.writeStack(); err != nil {
+	if err := a.prepare(ctx); err != nil {
 		return err
 	}
 	if err := c.Run(ctx, "up", "--detach", "db"); err != nil {
