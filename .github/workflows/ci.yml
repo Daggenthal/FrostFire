@@ -76,6 +76,8 @@ jobs:
             pkg install -y go curl
           run: |
             set -e
+            echo "::notice title=e2e FreeBSD::VM up, running unit tests"
             go test -count=1 ./...
             go build -o /usr/local/bin/frostfire ./cmd/frostfire
+            echo "::notice title=e2e FreeBSD::unit tests passed, starting end to end"
             sh ci/run-e2e.sh
