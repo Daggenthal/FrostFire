@@ -29,7 +29,7 @@ func EnvExample() []byte {
 // which compose builds itself.
 func Images(goos string) []string {
 	if goos == "freebsd" {
-		return []string{"db", "cache", "php", "web", "certbot"}
+		return []string{"base", "db", "cache", "php", "web", "certbot"} // base first: the others build on it
 	}
 	return nil
 }
