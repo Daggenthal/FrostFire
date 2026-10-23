@@ -28,7 +28,9 @@ services:
     networks: [backend]
 
   php:
-    build: ./php
+    build:
+      context: ./php
+      dockerfile: Containerfile  # Docker only looks for "Dockerfile" by default
     image: localhost/frostfire-php:latest
     restart: always
     environment:
