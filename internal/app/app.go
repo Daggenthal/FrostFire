@@ -294,7 +294,12 @@ func (a *App) dbAlive(ctx context.Context) bool {
 	if err != nil {
 		return false
 	}
-	return c.Cmd(ctx, "exec", "-T", "db", "mariadb-admin", "--silent", "ping").Run() == nil
+	// A probe must never hang, even if the engine does.
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	cmd := c.Cmd(ctx, "exec", "-T", "db", "mariadb-admin", "--silent", "ping")
+	cmd.WaitDelay = 5 * time.Second
+	return cmd.Run() == nil
 }
 
 func (a *App) waitForDB(ctx context.Context, timeout time.Duration) error {

@@ -7,16 +7,22 @@ set -eux
 ROOT=/srv/frostfire
 ENGINE="${FROSTFIRE_ENGINE:-podman}"
 
+# Usage: compose SECONDS ARGS...  (a time limit, so a stuck engine fails the test instead of hanging it)
 compose() {
-    "$ENGINE" compose --project-name frostfire --file "$ROOT/stack/compose.yaml" --env-file "$ROOT/frostfire.env" "$@"
+    secs=$1; shift
+    timeout "$secs" "$ENGINE" compose --project-name frostfire --file "$ROOT/stack/compose.yaml" --env-file "$ROOT/frostfire.env" "$@"
 }
 
 dump_logs() {
     set +e
-    compose ps
-    compose logs --tail 80
+    timeout 60 "$ENGINE" ps -a
+    compose 120 logs --tail 60
 }
 trap 'test $? -eq 0 || dump_logs' EXIT
+trap 'echo "e2e: timed out"; exit 124' TERM
+
+# Fail instead of hanging: every container command gets a time limit.
+t() { timeout "$@"; }
 
 # Checkpoints show up as annotations on the CI run.
 checkpoint() { echo "::notice title=e2e $(uname -s)::$*"; }
@@ -51,19 +57,21 @@ echo 'mysqli: ', extension_loaded('mysqli') ? 'yes' : 'no', "\n";
 echo 'memcached: ', extension_loaded('memcached') ? 'yes' : 'no', "\n";
 EOF
 
-frostfire up
-compose ps
+t 1800 frostfire up
+checkpoint "frostfire up finished"
+compose 60 ps
 
 # --- wait for MariaDB (first start initializes the datadir)
 i=0
-until frostfire db dump /tmp/probe.sql 2>/dev/null; do
+until t 60 frostfire db dump /tmp/probe.sql 2>/dev/null; do
     i=$((i + 1))
     [ "$i" -gt 60 ] && exit 1
     sleep 5
 done
 
 # --- containers reach each other by name, PHP has its extensions
-compose exec -T php php /srv/www/index.php | tee /tmp/php.txt
+compose 60 exec -T php php /srv/www/index.php > /tmp/php.txt
+cat /tmp/php.txt
 grep -q "db: reachable" /tmp/php.txt
 grep -q "cache: reachable" /tmp/php.txt
 grep -q "mysqli: yes" /tmp/php.txt
@@ -76,33 +84,33 @@ case "$(uname -s)" in
     *)       ip=127.0.0.1 ;;
 esac
 i=0
-until [ "$(curl -s -o /dev/null -w '%{http_code}' "http://$ip/")" = "503" ]; do
+until [ "$(curl -s -m 5 -o /dev/null -w '%{http_code}' "http://$ip/")" = "503" ]; do
     i=$((i + 1))
     [ "$i" -gt 30 ] && { curl -sv "http://$ip/" || true; exit 1; }
     sleep 2
 done
-curl -s -H 'Host: ci.example.org' "http://$ip/.well-known/acme-challenge/missing" -o /dev/null -w '%{http_code}\n' | grep -q 404
+curl -s -m 10 -H 'Host: ci.example.org' "http://$ip/.well-known/acme-challenge/missing" -o /dev/null -w '%{http_code}\n' | grep -q 404
 checkpoint "nginx answering on port 80"
 
 # --- data to protect
 printf 'CREATE DATABASE ci_marker;\nCREATE TABLE ci_marker.t (v VARCHAR(20));\nINSERT INTO ci_marker.t VALUES ("frostfire-ok");\n' > /tmp/seed.sql
-frostfire db load /tmp/seed.sql --yes
+t 900 frostfire db load /tmp/seed.sql --yes
 
 # --- back up, then break things
-frostfire backup
+t 900 frostfire backup
 frostfire list
 echo broken > "$ROOT/www/index.php"
 echo 'DROP DATABASE ci_marker;' > /tmp/drop.sql
-frostfire db load /tmp/drop.sql --yes
-frostfire db dump /tmp/broken.sql
+t 900 frostfire db load /tmp/drop.sql --yes
+t 900 frostfire db dump /tmp/broken.sql
 ! grep -q frostfire-ok /tmp/broken.sql
 checkpoint "backup done, site and database broken on purpose"
 
 # --- restore and check
-frostfire restore latest --yes
+t 900 frostfire restore latest --yes
 grep -q fsockopen "$ROOT/www/index.php"
 i=0
-until frostfire db dump /tmp/restored.sql 2>/dev/null; do
+until t 60 frostfire db dump /tmp/restored.sql 2>/dev/null; do
     i=$((i + 1)); [ "$i" -gt 30 ] && exit 1; sleep 5
 done
 grep -q frostfire-ok /tmp/restored.sql
@@ -110,5 +118,5 @@ checkpoint "restore brought back files and database"
 
 frostfire prune
 frostfire repo check
-frostfire doctor || true   # the only expected failure is the missing TLS certificate
+t 120 frostfire doctor || true   # the only expected failure is the missing TLS certificate
 checkpoint "E2E PASSED on $(uname -sr)"

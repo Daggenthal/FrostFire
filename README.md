@@ -14,7 +14,7 @@ FrostFire is the third take on my server backup tool, after [Peacebringer](https
 | `cache` | memcached 1.6 | Reachable from PHP as `cache:11211` |
 | `certbot` | certbot | Renews certificates twice a day |
 
-Works with Podman or Docker (whichever has `compose`). Linux first, FreeBSD support is next.
+Runs on Linux (Podman or Docker) and FreeBSD (Podman with native FreeBSD images). See [FreeBSD](#freebsd) for how that side works.
 
 ## Layout
 
@@ -45,7 +45,9 @@ FrostFire needs a container engine with compose and restic 0.17 or newer. `frost
 - Restart-on-boot for the containers (systemd)
 - HTTP and HTTPS in firewalld or ufw, if one is active
 
-It detects the distro from `/etc/os-release`, so derivatives work too. Supported families: Debian/Ubuntu/Raspberry Pi OS, Fedora, RHEL/CentOS/Rocky/Alma, Arch, openSUSE and Alpine. It's safe to run again, and `--dry-run` shows the plan without changing anything.
+It detects the distro from `/etc/os-release`, so derivatives work too. Supported families: Debian/Ubuntu/Raspberry Pi OS, Fedora, RHEL/CentOS/Rocky/Alma, Arch, openSUSE, Alpine and FreeBSD. It's safe to run again, and `--dry-run` shows the plan without changing anything.
+
+Podman is the default. For Docker instead, use `frostfire setup --engine docker` (not available on the RHEL family or FreeBSD).
 
 ## Quick start
 
@@ -106,6 +108,32 @@ To run it nightly, add a cron entry or systemd timer, for example:
 4. In the site's PHP config: The database host is now `db` and memcached is `cache`, not `localhost`.
 5. Either `frostfire certs issue` once DNS points here, or copy `/etc/letsencrypt` into `certs/` first.
 
+## FreeBSD
+
+The same commands work on FreeBSD, and backups move between Linux and FreeBSD in both directions. Under the hood it's different:
+
+| | Linux | FreeBSD |
+|---|---|---|
+| Containers | Namespaces and cgroups | Jails, via Podman |
+| Images | Official upstream images (mariadb, nginx, php, ...) | Built locally from FreeBSD's own `freebsd-runtime` image plus `pkg`, matching the host's release |
+| Container networking | Handled by the engine | NAT and port redirects through pf |
+| Image storage | Engine default | A ZFS dataset (`<pool>/containers`), or the vfs driver without ZFS |
+| Restart on boot | `podman-restart.service` (or Docker) | `podman_enable=YES` in rc.conf |
+| Healthchecks | Used to order startup | Not used: frostfire waits for MariaDB itself |
+| Runs as | root by default | root, always (a jail requirement) |
+
+What `frostfire setup` does on FreeBSD, following the Handbook's Podman chapter:
+
+- Installs `podman-suite`, `podman-compose` and `restic` by port origin, so Python flavor changes (py311, py312, ...) don't break it
+- Mounts fdescfs on `/dev/fd` and adds it to `/etc/fstab`
+- Creates a ZFS dataset for container storage, or switches Podman to vfs on UFS
+- Writes `/etc/pf.conf` with Podman's NAT and redirect anchors if you don't have one. It blocks nothing, so SSH keeps working. **An existing pf.conf is never touched**: setup stops and prints the lines to add
+- Enables and starts pf, sets `net.pf.filter_local=1`, and enables `podman_enable`
+
+Run it inside tmux or screen if you're on SSH, since starting pf can drop the session for a moment.
+
+Paths inside the containers are the same as on Linux (`/etc/letsencrypt`, `/srv/www`, ...), even where FreeBSD would normally use `/usr/local/etc`. That's what keeps backups portable.
+
 ## Development
 
 ```sh
@@ -113,6 +141,8 @@ go test ./...
 ```
 
 The end-to-end test runs a real backup and restore against a local restic repository, using a fake container engine. It's skipped if restic isn't installed.
+
+CI also runs `ci/e2e.sh` for real on a Linux runner (Docker) and in a FreeBSD 15 VM (Podman): setup twice, init, up, check PHP can reach the database and memcached, back up, break the site and database on purpose, restore, and check both came back.
 
 ## License
 

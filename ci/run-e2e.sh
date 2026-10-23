@@ -2,7 +2,7 @@
 # Runs ci/e2e.sh, streaming its output. On failure, the last part of the log is also
 # posted as a GitHub annotation, so it can be read without downloading the job log.
 log=/tmp/frostfire-e2e.log
-{ sh "$(dirname "$0")/e2e.sh"; echo $? > /tmp/frostfire-e2e.rc; } 2>&1 | tee "$log"
+{ timeout -s TERM 2700 sh "$(dirname "$0")/e2e.sh"; echo $? > /tmp/frostfire-e2e.rc; } 2>&1 | tee "$log"
 rc=$(cat /tmp/frostfire-e2e.rc)
 if [ "$rc" != 0 ]; then
     printf '::error title=e2e failed on %s::' "$(uname -s)"
