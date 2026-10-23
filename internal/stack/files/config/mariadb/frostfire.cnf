@@ -1,0 +1,7 @@
+# Your MariaDB settings. Restart the stack after changing: frostfire up
+[mariadb]
+character-set-server = utf8mb4
+collation-server     = utf8mb4_unicode_ci
+
+# Plenty for a ~2GB database on a small VPS. Raise it if the box has RAM to spare.
+innodb_buffer_pool_size = 512M

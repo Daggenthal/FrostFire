@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install restic
+        env:
+          RESTIC_VERSION: 0.18.1
+        run: |
+          curl -fsSL -o restic.bz2 "https://github.com/restic/restic/releases/download/v${RESTIC_VERSION}/restic_${RESTIC_VERSION}_linux_amd64.bz2"
+          bunzip2 restic.bz2
+          sudo install -m 755 restic /usr/local/bin/restic
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -count=1 ./...
+
+      - name: Validate compose file
+        run: |
+          printf 'DOMAIN=example.org\nMARIADB_ROOT_PASSWORD=x\n' > /tmp/ci.env
+          docker compose -f internal/stack/files/stack/compose.yaml --env-file /tmp/ci.env config --quiet
+
+      - name: Build for Linux and FreeBSD
+        run: |
+          for target in linux/amd64 linux/arm64 freebsd/amd64 freebsd/arm64; do
+            GOOS=${target%/*} GOARCH=${target#*/} go build -o /dev/null ./cmd/frostfire
+          done
