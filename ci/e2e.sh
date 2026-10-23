@@ -16,7 +16,11 @@ compose() {
 dump_logs() {
     set +e
     timeout 60 "$ENGINE" ps -a
-    compose 120 logs --tail 60
+    compose 120 logs --tail 40
+    if [ -f /tmp/ps-during-up.txt ]; then
+        echo "=== processes 8 minutes into frostfire up ==="
+        cat /tmp/ps-during-up.txt
+    fi
 }
 trap 'test $? -eq 0 || dump_logs' EXIT
 trap 'echo "e2e: timed out"; exit 124' TERM
@@ -57,7 +61,11 @@ echo 'mysqli: ', extension_loaded('mysqli') ? 'yes' : 'no', "\n";
 echo 'memcached: ', extension_loaded('memcached') ? 'yes' : 'no', "\n";
 EOF
 
-t 1800 frostfire up
+# If `up` gets stuck, this snapshot shows what it's waiting on.
+( sleep 480; ps -axww -o pid,ppid,stat,etime,command > /tmp/ps-during-up.txt 2>&1 ) &
+watch=$!
+t 900 frostfire up
+kill "$watch" 2>/dev/null || true
 checkpoint "frostfire up finished"
 compose 60 ps
 
