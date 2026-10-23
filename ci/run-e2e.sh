@@ -11,7 +11,7 @@ if [ "$rc" != 0 ]; then
     # The last 12 KB, as four annotations of 3 KB each.
     tail -c 12000 "$log" > /tmp/frostfire-e2e.tail
     for part in 1 2 3 4; do
-        printf '::error title=e2e failed on %s (exit %s), part %s of 4::' "$(uname -s)" "$rc" "$part"
+        printf '::error title=e2e failed on %s (exit %s) part %s of 4::' "$(uname -s)" "$rc" "$part"
         dd if=/tmp/frostfire-e2e.tail bs=3000 skip=$((part - 1)) count=1 2>/dev/null |
             awk 'BEGIN { ORS = "%0A" } { gsub(/%/, "%25"); gsub(/\r/, ""); print }'
         echo

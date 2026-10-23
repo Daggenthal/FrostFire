@@ -4,5 +4,15 @@
 ARG FREEBSD_VERSION=15.0
 FROM docker.io/freebsd/freebsd-runtime:${FREEBSD_VERSION}
 
-RUN env ASSUME_ALWAYS_YES=yes pkg bootstrap -f \
+# Never stop at a prompt during a build. Package sets are built for the newest
+# minor release of a major version (e.g. 15.1) and are ABI compatible with older
+# minors, so the OS version check is skipped, as FreeBSD suggests.
+ENV ASSUME_ALWAYS_YES=yes \
+    IGNORE_OSVERSION=yes
+
+# The image ships the pkgbase repository (FreeBSD-base) enabled but without its
+# signing keys, which makes `pkg update` fail. Only ports packages are used here.
+RUN mkdir -p /usr/local/etc/pkg/repos \
+ && printf 'FreeBSD-base: { enabled: no }\n' > /usr/local/etc/pkg/repos/FreeBSD-base.conf \
+ && pkg bootstrap -f \
  && pkg update -f
