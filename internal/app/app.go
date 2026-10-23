@@ -21,6 +21,7 @@ import (
 	"github.com/Daggenthal/FrostFire/internal/platform"
 	"github.com/Daggenthal/FrostFire/internal/restic"
 	"github.com/Daggenthal/FrostFire/internal/stack"
+	"github.com/Daggenthal/FrostFire/internal/trace"
 )
 
 // Directories under the root. db is the live MariaDB datadir and is never copied
@@ -66,6 +67,7 @@ func (a *App) load() error {
 		return err
 	}
 	a.Cfg = cfg
+	trace.Logf("loaded %s (%d settings)", config.EnvPath(a.Root), len(cfg.Vars))
 	return nil
 }
 
@@ -81,12 +83,14 @@ func (a *App) engine() (*engine.Compose, error) {
 		return nil, err
 	}
 	a.compose = &engine.Compose{Bin: bin, Root: a.Root, Stdout: a.Stdout, Stderr: a.Stderr}
+	trace.Logf("container engine: %s compose, stack: %s", bin, a.OS)
 	if a.OS == "freebsd" {
 		v, err := platform.FreeBSDImageVersion(a.Cfg.Get("FREEBSD_IMAGE_VERSION", ""))
 		if err != nil {
 			return nil, err
 		}
 		a.compose.Env = []string{"FREEBSD_VERSION=" + v}
+		trace.Logf("FreeBSD images build from freebsd-runtime:%s", v)
 	}
 	return a.compose, nil
 }
@@ -189,6 +193,7 @@ func (a *App) prepare(ctx context.Context) error {
 			return err
 		}
 	}
+	trace.Logf("writing the %s stack to %s", a.OS, filepath.Join(a.Root, "stack"))
 	if err := stack.WriteStack(a.Root, a.OS); err != nil {
 		return fmt.Errorf("writing stack files: %w", err)
 	}
@@ -210,6 +215,8 @@ func (a *App) prepare(ctx context.Context) error {
 		return err
 	}
 	haveCert := a.haveCert()
+	trace.Logf("certificate %s present: %v (nginx mode: %s)", stack.CertPath(a.Root, a.Cfg.Get("DOMAIN", "")), haveCert,
+		map[bool]string{true: "HTTPS", false: "bootstrap, ACME only"}[haveCert])
 	if !haveCert {
 		a.warn("no certificate for %s yet: serving ACME challenges only until you run `frostfire certs issue`", a.Cfg.Get("DOMAIN", "DOMAIN"))
 	}
@@ -299,7 +306,7 @@ func (a *App) dbAlive(ctx context.Context) bool {
 	defer cancel()
 	cmd := c.Cmd(ctx, "exec", "-T", "db", "mariadb-admin", "--silent", "ping")
 	cmd.WaitDelay = 5 * time.Second
-	return cmd.Run() == nil
+	return trace.Run(cmd) == nil
 }
 
 func (a *App) waitForDB(ctx context.Context, timeout time.Duration) error {
@@ -338,14 +345,14 @@ func (a *App) DBDump(ctx context.Context, path string) error {
 	cmd.Stderr = a.Stderr
 	if path == "-" {
 		cmd.Stdout = a.Stdout
-		return cmd.Run()
+		return trace.Run(cmd)
 	}
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
 	}
 	cmd.Stdout = f
-	if err := cmd.Run(); err != nil {
+	if err := trace.Run(cmd); err != nil {
 		f.Close()
 		os.Remove(path)
 		return fmt.Errorf("dump failed: %w", err)
@@ -379,7 +386,7 @@ func (a *App) DBLoad(ctx context.Context, path string, yes bool) error {
 	a.step("Loading %s", path)
 	cmd := c.Cmd(ctx, loadArgs()...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = in, a.Stdout, a.Stderr
-	if err := cmd.Run(); err != nil {
+	if err := trace.Run(cmd); err != nil {
 		return fmt.Errorf("loading %s: %w", path, err)
 	}
 	a.step("Database loaded")
@@ -442,12 +449,13 @@ func pipe(src, dst *exec.Cmd) error {
 		return err
 	}
 	src.Stdout, dst.Stdin = w, r
-	if err := src.Start(); err != nil {
+	started := time.Now()
+	if err := trace.Start(src); err != nil {
 		r.Close()
 		w.Close()
 		return err
 	}
-	if err := dst.Start(); err != nil {
+	if err := trace.Start(dst); err != nil {
 		r.Close()
 		w.Close()
 		src.Process.Kill()
@@ -457,7 +465,7 @@ func pipe(src, dst *exec.Cmd) error {
 	// The children hold their own copies now.
 	r.Close()
 	w.Close()
-	srcErr, dstErr := src.Wait(), dst.Wait()
+	srcErr, dstErr := trace.Wait(src, started), trace.Wait(dst, started)
 	if srcErr != nil {
 		return fmt.Errorf("%s: %w", filepath.Base(src.Path), srcErr)
 	}

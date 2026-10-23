@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Daggenthal/FrostFire/internal/trace"
 )
 
 // MinVersion is the oldest restic with `backup --stdin-from-command`, which lets a
@@ -54,7 +56,7 @@ func (r *Restic) Cmd(ctx context.Context, args ...string) *exec.Cmd {
 func (r *Restic) run(ctx context.Context, args ...string) error {
 	cmd := r.Cmd(ctx, args...)
 	cmd.Stdout, cmd.Stderr = r.Stdout, r.Stderr
-	if err := cmd.Run(); err != nil {
+	if err := trace.Run(cmd); err != nil {
 		return fmt.Errorf("restic %s: %w", args[0], err)
 	}
 	return nil
@@ -63,7 +65,7 @@ func (r *Restic) run(ctx context.Context, args ...string) error {
 // Version returns restic's version as [major, minor, patch].
 func (r *Restic) Version(ctx context.Context) ([3]int, error) {
 	var v [3]int
-	out, err := r.Cmd(ctx, "version").Output()
+	out, err := trace.Output(r.Cmd(ctx, "version"))
 	if err != nil {
 		return v, fmt.Errorf("running %s version: %w", r.Bin, err)
 	}
@@ -108,7 +110,7 @@ func (r *Restic) Init(ctx context.Context) error { return r.run(ctx, "init") }
 
 // RepoReachable checks the repository exists and the password opens it.
 func (r *Restic) RepoReachable(ctx context.Context) error {
-	out, err := r.Cmd(ctx, "cat", "config").CombinedOutput()
+	out, err := trace.CombinedOutput(r.Cmd(ctx, "cat", "config"))
 	if err != nil {
 		return fmt.Errorf("%s", strings.TrimSpace(lastLine(string(out))))
 	}
@@ -137,7 +139,7 @@ func (r *Restic) Snapshots(ctx context.Context, tags ...string) ([]Snapshot, err
 	}
 	cmd := r.Cmd(ctx, args...)
 	cmd.Stderr = r.Stderr
-	out, err := cmd.Output()
+	out, err := trace.Output(cmd)
 	if err != nil {
 		return nil, fmt.Errorf("restic snapshots: %w", err)
 	}

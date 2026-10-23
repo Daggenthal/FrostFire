@@ -5,6 +5,7 @@
 set -eux
 
 ROOT=/srv/frostfire
+export FROSTFIRE_VERBOSE=1   # every command frostfire runs is logged with timing
 ENGINE="${FROSTFIRE_ENGINE:-podman}"
 
 # Usage: compose SECONDS ARGS...  (a time limit, so a stuck engine fails the test instead of hanging it)
@@ -25,6 +26,9 @@ dump_logs() {
         echo "=== last lines of frostfire up ==="
         tail -n 25 /tmp/up.log
     fi
+    echo "=== frostfire diag ==="
+    timeout 600 frostfire diag > /tmp/frostfire-diag.txt 2>&1
+    tail -n 150 /tmp/frostfire-diag.txt
     if [ -f /tmp/ps-during-up.txt ]; then
         echo "=== processes (latest snapshot during up) ==="
         grep -vE 'sleep|ps -axww|\[' /tmp/ps-during-up.txt | tail -n 40

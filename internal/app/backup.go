@@ -16,6 +16,7 @@ import (
 	"github.com/Daggenthal/FrostFire/internal/config"
 	"github.com/Daggenthal/FrostFire/internal/restic"
 	"github.com/Daggenthal/FrostFire/internal/stack"
+	"github.com/Daggenthal/FrostFire/internal/trace"
 )
 
 const (
@@ -99,6 +100,7 @@ func (a *App) Backup(ctx context.Context) error {
 	}
 
 	// Database first: if the dump fails, the run stops before leaving a lone files snapshot.
+	trace.Logf("backup run %s, file paths: %v", id, paths)
 	start := time.Now()
 	a.step("Backing up databases")
 	if err := rs.BackupCommand(ctx, append(tags, tagDB), dbDumpName, c.Argv(dumpArgs()...)); err != nil {
@@ -269,6 +271,7 @@ func (a *App) restoreFiles(ctx context.Context, rs *restic.Restic, snap *restic.
 			continue
 		}
 		dst := filepath.Join(a.Root, name)
+		trace.Logf("restore %s -> %s", src, dst)
 		if _, err := os.Lstat(dst); err == nil {
 			if err := os.MkdirAll(aside, 0o750); err != nil {
 				return err

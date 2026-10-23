@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+
+	"github.com/Daggenthal/FrostFire/internal/trace"
 )
 
 // Detect picks the container engine. An explicit override wins; otherwise the first of
@@ -31,7 +33,7 @@ func Detect(override string) (string, error) {
 		if err != nil {
 			continue
 		}
-		if exec.Command(bin, "compose", "version").Run() == nil {
+		if trace.Run(exec.Command(bin, "compose", "version")) == nil {
 			return bin, nil
 		}
 	}
@@ -77,7 +79,7 @@ func (c *Compose) Run(ctx context.Context, args ...string) error {
 	cmd := c.Cmd(ctx, args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout, cmd.Stderr = c.Stdout, c.Stderr
-	if err := cmd.Run(); err != nil {
+	if err := trace.Run(cmd); err != nil {
 		return fmt.Errorf("compose %v: %w", args, err)
 	}
 	return nil
@@ -93,7 +95,7 @@ func (c *Compose) Build(ctx context.Context, tag, dir string, buildArgs map[stri
 	cmd := exec.CommandContext(ctx, c.Bin, append(args, dir)...)
 	cmd.Env = append(os.Environ(), c.Env...)
 	cmd.Stdout, cmd.Stderr = c.Stdout, c.Stderr
-	if err := cmd.Run(); err != nil {
+	if err := trace.Run(cmd); err != nil {
 		return fmt.Errorf("building %s: %w", tag, err)
 	}
 	return nil

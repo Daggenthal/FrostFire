@@ -12,6 +12,7 @@ import (
 	"github.com/Daggenthal/FrostFire/internal/engine"
 	"github.com/Daggenthal/FrostFire/internal/platform"
 	"github.com/Daggenthal/FrostFire/internal/restic"
+	"github.com/Daggenthal/FrostFire/internal/trace"
 )
 
 // SetupOptions controls `frostfire setup`.
@@ -38,9 +39,11 @@ func (realHost) Exists(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil
 }
-func (realHost) Probe(argv ...string) bool { return exec.Command(argv[0], argv[1:]...).Run() == nil }
+func (realHost) Probe(argv ...string) bool {
+	return trace.Run(exec.Command(argv[0], argv[1:]...)) == nil
+}
 func (realHost) Output(argv ...string) (string, error) {
-	out, err := exec.Command(argv[0], argv[1:]...).Output()
+	out, err := trace.Output(exec.Command(argv[0], argv[1:]...))
 	return string(out), err
 }
 func (realHost) ReadFile(p string) ([]byte, error) { return os.ReadFile(p) }
@@ -104,7 +107,7 @@ func (a *App) Setup(ctx context.Context, opt SetupOptions) error {
 		cmd := exec.CommandContext(ctx, s.argv[0], s.argv[1:]...)
 		cmd.Env = append(os.Environ(), s.env...)
 		cmd.Stdout, cmd.Stderr = a.Stdout, a.Stderr
-		if err := cmd.Run(); err != nil {
+		if err := trace.Run(cmd); err != nil {
 			return fmt.Errorf("%s: %w", strings.Join(s.argv, " "), err)
 		}
 	}
@@ -143,6 +146,8 @@ func (a *App) planSetup(h Host, p platform.Platform, opt SetupOptions) ([]setupS
 		return nil, fmt.Errorf("unknown engine %q (use podman or docker)", want)
 	}
 	engineName, engineReady := detectEngine(h, want)
+	trace.Logf("setup: platform %s (family %s, init %s), wanted engine %q, found working %q: %v",
+		p.Name, p.Family, p.Init, want, engineName, engineReady)
 	if engineReady {
 		a.step("Container engine: %s compose (already installed)", engineName)
 	} else {
@@ -168,12 +173,14 @@ func (a *App) planSetup(h Host, p platform.Platform, opt SetupOptions) ([]setupS
 
 	// restic.
 	resticOK, detail := a.resticStatus(h)
+	trace.Logf("setup: restic %s, usable: %v", detail, resticOK)
 	if resticOK {
 		a.step("restic: %s (already installed)", detail)
 	} else if _, err := h.LookPath("restic"); err != nil {
 		tools = append(tools, platform.ToolRestic)
 	}
 
+	trace.Logf("setup: packages to install: %v", tools)
 	var steps []setupStep
 	for _, argv := range p.InstallCommands(tools) {
 		desc := "Install packages"
@@ -350,7 +357,9 @@ func freebsdHostSteps(h Host) []setupStep {
 	}
 
 	// Storage: a ZFS dataset gives copy-on-write image layers and snapshots for free.
-	if pool := zfsPool(h); pool != "" {
+	pool := zfsPool(h)
+	trace.Logf("setup: ZFS root pool: %q (empty means no ZFS, use vfs)", pool)
+	if pool != "" {
 		if mps, _ := h.Output("zfs", "list", "-H", "-o", "mountpoint"); !containsLine(mps, containersDir) {
 			ds := pool + "/containers"
 			steps = append(steps, setupStep{desc: "Create ZFS dataset " + ds + " for container storage",
@@ -376,6 +385,7 @@ func freebsdHostSteps(h Host) []setupStep {
 		steps = append(steps, setupStep{desc: "Enable pf at boot", argv: []string{"sysrc", "pf_enable=YES"}})
 	}
 	pfRunning := h.Probe("service", "pf", "status")
+	trace.Logf("setup: pf.conf has Podman anchors: %v, pf running: %v", pfReady, pfRunning)
 	switch {
 	case !pfRunning:
 		steps = append(steps, setupStep{desc: "Start pf", argv: []string{"service", "pf", "start"}})

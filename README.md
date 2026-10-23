@@ -134,6 +134,19 @@ Run it inside tmux or screen if you're on SSH, since starting pf can drop the se
 
 Paths inside the containers are the same as on Linux (`/etc/letsencrypt`, `/srv/www`, ...), even where FreeBSD would normally use `/usr/local/etc`. That's what keeps backups portable.
 
+## Troubleshooting
+
+Two tools, made for figuring out what went wrong:
+
+```sh
+sudo frostfire -v up                    # verbose: every command frostfire runs, with timing and exit status
+sudo frostfire diag > frostfire-diag.txt   # full report: host, engine, containers, logs, backups, pf
+```
+
+Verbose mode (`-v`, `--verbose`, or `FROSTFIRE_VERBOSE=1`) works with every command. It also logs the decisions frostfire makes: which engine, which FreeBSD image version, whether a certificate exists, and what `setup` found before planning each step.
+
+`frostfire diag` collects everything in one report: OS and versions, which settings are set (names only, never values), the container engine's info, images and containers, the last 40 log lines of every service, the backup repository, and on FreeBSD the pf rules and anchors, fdescfs, ZFS datasets and Podman's storage driver. Every command in it has a time limit, so a stuck engine can't hang the report. Secrets are never printed in either mode, but give the report a once-over before sharing it publicly.
+
 ## Development
 
 ```sh
@@ -142,7 +155,7 @@ go test ./...
 
 The end-to-end test runs a real backup and restore against a local restic repository, using a fake container engine. It's skipped if restic isn't installed.
 
-CI also runs `ci/e2e.sh` for real on a Linux runner (Docker) and in a FreeBSD 15 VM (Podman): setup twice, init, up, check PHP can reach the database and memcached, back up, break the site and database on purpose, restore, and check both came back.
+CI also runs `ci/e2e.sh` for real on a Linux runner (Docker) on every push. The same test in a FreeBSD 15 VM (Podman) runs only when started by hand from the Actions tab, since the nested VM makes it take 45+ minutes: setup twice, init, up, check PHP can reach the database and memcached, back up, break the site and database on purpose, restore, and check both came back.
 
 ## License
 

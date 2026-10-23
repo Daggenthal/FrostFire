@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 
 	"github.com/Daggenthal/FrostFire/internal/app"
 	"github.com/Daggenthal/FrostFire/internal/config"
+	"github.com/Daggenthal/FrostFire/internal/trace"
 )
 
 var version = "dev"
@@ -26,6 +28,7 @@ Setup:
                           restic, boot and firewall setup (--dry-run, --yes)
   init                    Create the root, frostfire.env and default config
   doctor                  Check settings, engine, restic and the backup repository
+  diag                    Print a full diagnostics report (save it: frostfire diag > diag.txt)
   repo init               Create the backup repository (once)
 
 Stack:
@@ -49,6 +52,8 @@ Database:
 
 Global options:
   --root DIR              FrostFire root (default $FROSTFIRE_ROOT or /srv/frostfire)
+  -v, --verbose           Print every command frostfire runs, with timing and exit status
+                          (or set FROSTFIRE_VERBOSE=1). Secrets are never printed
   --version               Print the version
 `
 
@@ -64,6 +69,9 @@ func run() error {
 	global.Usage = func() { fmt.Fprint(os.Stderr, usage) }
 	root := global.String("root", envOr("FROSTFIRE_ROOT", config.DefaultRoot), "")
 	showVersion := global.Bool("version", false, "")
+	var verbose bool
+	global.BoolVar(&verbose, "verbose", os.Getenv("FROSTFIRE_VERBOSE") != "", "")
+	global.BoolVar(&verbose, "v", os.Getenv("FROSTFIRE_VERBOSE") != "", "")
 	if err := global.Parse(os.Args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -73,6 +81,10 @@ func run() error {
 	if *showVersion {
 		fmt.Println("frostfire", version)
 		return nil
+	}
+	if verbose {
+		trace.Enable(os.Stderr)
+		trace.Logf("frostfire %s on %s/%s, root %s", version, runtime.GOOS, runtime.GOARCH, *root)
 	}
 	args := global.Args()
 	if len(args) == 0 {
@@ -96,6 +108,8 @@ func run() error {
 			return err
 		}
 		return a.Setup(ctx, app.SetupOptions{Engine: *engineName, Yes: *yes, DryRun: *dryRun})
+	case "diag":
+		return a.Diag(ctx, version)
 	case "init":
 		return a.Init()
 	case "doctor":

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/Daggenthal/FrostFire/internal/config"
+	"github.com/Daggenthal/FrostFire/internal/trace"
 )
 
 // Tools frostfire may need to install.
@@ -122,7 +123,7 @@ func Detect() (Platform, error) {
 	case "freebsd":
 		p := freebsd
 		p.Name = "FreeBSD"
-		if out, err := exec.Command("freebsd-version").Output(); err == nil {
+		if out, err := trace.Output(exec.Command("freebsd-version")); err == nil {
 			p.Name += " " + strings.TrimSpace(string(out))
 		}
 		return p, nil
@@ -199,7 +200,7 @@ func FreeBSDImageVersion(override string) (string, error) {
 	if override != "" {
 		return override, nil
 	}
-	out, err := exec.Command("freebsd-version", "-k").Output()
+	out, err := trace.Output(exec.Command("freebsd-version", "-k"))
 	if err != nil {
 		return "", fmt.Errorf("running freebsd-version: %w", err)
 	}
