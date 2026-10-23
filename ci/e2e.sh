@@ -20,8 +20,10 @@ dump_logs() {
     echo "=== container logs ==="
     compose 120 logs --tail 15
     if [ -f /tmp/up.log ]; then
+        echo "=== frostfire up progress ($(( $(date +%s) - $(cat /tmp/up.start) ))s since it started) ==="
+        grep -E '^==>|^STEP|^Error|^frostfire' /tmp/up.log | tail -n 30
         echo "=== last lines of frostfire up ==="
-        tail -n 40 /tmp/up.log
+        tail -n 25 /tmp/up.log
     fi
     if [ -f /tmp/ps-during-up.txt ]; then
         echo "=== processes (latest snapshot during up) ==="
@@ -29,7 +31,7 @@ dump_logs() {
     fi
 }
 trap 'test $? -eq 0 || dump_logs' EXIT
-trap 'echo "e2e: timed out"; exit 124' TERM
+trap 'echo "e2e: timed out"; kill "${up:-}" 2>/dev/null; exit 124' TERM
 
 # Fail instead of hanging: every container command gets a time limit.
 t() { timeout "$@"; }
@@ -70,7 +72,12 @@ EOF
 # While `up` runs, keep a fresh process snapshot so a stall can be diagnosed.
 ( set +x; while :; do ps -axww -o pid,ppid,stat,etime,command > /tmp/ps-during-up.txt 2>&1; sleep 120; done ) &
 watch=$!
-if ! t 3000 frostfire up > /tmp/up.log 2>&1; then
+# Run in the background and wait: `wait` can be interrupted by the TERM trap, a
+# foreground command can't, and then the failure dump would never print.
+date +%s > /tmp/up.start
+t 4200 frostfire up > /tmp/up.log 2>&1 &
+up=$!
+if ! wait "$up"; then
     kill "$watch" 2>/dev/null || true
     exit 1
 fi
