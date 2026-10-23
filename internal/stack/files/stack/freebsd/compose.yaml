@@ -6,6 +6,9 @@
 # Differences from Linux:
 #   - No healthchecks: Podman on FreeBSD has no systemd timers to run them.
 #     frostfire waits for MariaDB itself, and PHP reconnects on its own.
+#   - No depends_on: when Podman on FreeBSD starts a container's dependencies it
+#     tries to start already-running ones again, and the CNI bridge plugin fails with
+#     "duplicate allocation". Services start in file order instead.
 #   - Containers are jails, and all of them run as root (a FreeBSD jail requirement).
 
 name: frostfire
@@ -39,7 +42,6 @@ services:
     volumes:
       - ../www:/srv/www
       - ../config/php/frostfire.ini:/usr/local/etc/php/zz-frostfire.ini:ro
-    depends_on: [db, cache]
     networks: [backend]
 
   web:
@@ -55,7 +57,6 @@ services:
       - ./nginx/templates:/frostfire/templates:ro
       - ../certs:/etc/letsencrypt:ro
       - ../acme:/srv/acme:ro
-    depends_on: [php]
     networks: [backend]
 
   certbot:
