@@ -6,7 +6,7 @@ name: frostfire
 services:
   db:
     image: docker.io/library/mariadb:11.8
-    restart: unless-stopped
+    restart: always
     environment:
       MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:?set MARIADB_ROOT_PASSWORD in frostfire.env}
       MARIADB_AUTO_UPGRADE: "1"
@@ -23,14 +23,14 @@ services:
 
   cache:
     image: docker.io/library/memcached:1.6-alpine
-    restart: unless-stopped
+    restart: always
     command: ["memcached", "-m", "${MEMCACHED_MB:-128}"]
     networks: [backend]
 
   php:
     build: ./php
     image: localhost/frostfire-php:latest
-    restart: unless-stopped
+    restart: always
     environment:
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
@@ -49,7 +49,7 @@ services:
 
   web:
     image: docker.io/library/nginx:stable-alpine
-    restart: unless-stopped
+    restart: always
     ports:
       - "80:80"
       - "443:443"
@@ -74,7 +74,7 @@ services:
 
   certbot:
     image: docker.io/certbot/certbot:latest
-    restart: unless-stopped
+    restart: always
     volumes:
       - ../certs:/etc/letsencrypt
       - ../acme:/srv/acme

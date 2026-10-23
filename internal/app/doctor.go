@@ -46,7 +46,7 @@ func (a *App) Doctor(ctx context.Context) error {
 
 	bin, err := engine.Detect(a.Cfg.Get("FROSTFIRE_ENGINE", ""))
 	if err != nil {
-		check(false, "container engine", err.Error())
+		check(false, "container engine", err.Error()+" (run `frostfire setup`)")
 	} else {
 		check(true, "container engine", bin+" compose")
 	}
@@ -54,12 +54,12 @@ func (a *App) Doctor(ctx context.Context) error {
 	if rs, err := a.backupRepo(); err != nil {
 		check(false, "backup settings", err.Error())
 	} else if v, err := rs.Version(ctx); err != nil {
-		check(false, "restic", err.Error()+" (install it from your package manager)")
+		check(false, "restic", err.Error()+" (run `frostfire setup`)")
 	} else {
 		ok := restic.AtLeast(v, restic.MinVersion)
 		detail := fmt.Sprintf("%d.%d.%d", v[0], v[1], v[2])
 		if !ok {
-			detail += fmt.Sprintf(" (need %d.%d.%d or newer)", restic.MinVersion[0], restic.MinVersion[1], restic.MinVersion[2])
+			detail += fmt.Sprintf(" (need %d.%d.%d or newer, run `frostfire setup`)", restic.MinVersion[0], restic.MinVersion[1], restic.MinVersion[2])
 		}
 		check(ok, "restic", detail)
 		if ok {

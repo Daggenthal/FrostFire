@@ -96,7 +96,7 @@ func (a *App) backupRepo() (*restic.Restic, error) {
 		return nil, fmt.Errorf("set RESTIC_PASSWORD (or RESTIC_PASSWORD_FILE) in %s", config.EnvPath(a.Root))
 	}
 	a.restic = &restic.Restic{
-		Bin:    a.Cfg.Get("RESTIC_BIN", "restic"),
+		Bin:    restic.FindBin(a.Cfg.Get("RESTIC_BIN", "")),
 		Env:    a.Cfg.Environ(),
 		Stdout: a.Stdout,
 		Stderr: a.Stderr,
@@ -142,7 +142,7 @@ func (a *App) Init() error {
 Next steps:
   1. Edit %s (DOMAIN, ADMIN_EMAIL, SMTP_PASSWORD, RESTIC_REPOSITORY)
   2. Save RESTIC_PASSWORD in your password manager
-  3. frostfire doctor
+  3. frostfire doctor         (if anything is missing: frostfire setup)
   4. frostfire repo init      (once, creates the backup repository)
   5. frostfire up
   6. frostfire certs issue

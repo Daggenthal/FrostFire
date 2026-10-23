@@ -38,11 +38,19 @@ go build -o frostfire ./cmd/frostfire
 sudo install -m 755 frostfire /usr/local/bin/
 ```
 
-You also need restic 0.17 or newer and Podman or Docker with compose. `frostfire doctor` checks all of it.
+FrostFire needs a container engine with compose and restic 0.17 or newer. `frostfire setup` installs whatever is missing:
+
+- Podman and podman-compose, unless a working Podman or Docker compose is already there
+- restic from your distro, or the official release (checksum verified) if the distro's is too old
+- Restart-on-boot for the containers (systemd)
+- HTTP and HTTPS in firewalld or ufw, if one is active
+
+It detects the distro from `/etc/os-release`, so derivatives work too. Supported families: Debian/Ubuntu/Raspberry Pi OS, Fedora, RHEL/CentOS/Rocky/Alma, Arch, openSUSE and Alpine. It's safe to run again, and `--dry-run` shows the plan without changing anything.
 
 ## Quick start
 
 ```sh
+sudo frostfire setup          # install prerequisites
 sudo frostfire init           # creates the root and frostfire.env with generated passwords
 sudoedit /srv/frostfire/frostfire.env
 sudo frostfire doctor

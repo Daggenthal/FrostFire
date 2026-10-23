@@ -22,6 +22,7 @@ Usage:
   frostfire [--root DIR] <command> [options]
 
 Setup:
+  setup                   Install what's missing: Podman, compose, restic (--dry-run, --yes)
   init                    Create the root, frostfire.env and default config
   doctor                  Check settings, engine, restic and the backup repository
   repo init               Create the backup repository (once)
@@ -85,6 +86,14 @@ func run() error {
 	cmd, rest := args[0], args[1:]
 
 	switch cmd {
+	case "setup":
+		fs := flag.NewFlagSet("setup", flag.ContinueOnError)
+		yes := fs.Bool("yes", false, "don't ask for confirmation")
+		dryRun := fs.Bool("dry-run", false, "show the plan without changing anything")
+		if err := fs.Parse(rest); err != nil {
+			return err
+		}
+		return a.Setup(ctx, app.SetupOptions{Yes: *yes, DryRun: *dryRun})
 	case "init":
 		return a.Init()
 	case "doctor":
