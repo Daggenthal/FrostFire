@@ -33,10 +33,20 @@ wait_up() {
     done
 }
 
+marker="$datadir/.frostfire-init-incomplete"
+if [ -f "$marker" ]; then
+    # A previous first-time init died halfway: start it over from an empty datadir.
+    echo "frostfire: previous initialization did not finish, starting it over" >&2
+    find "$datadir" -mindepth 1 -delete
+fi
+
 if [ ! -d "$datadir/mysql" ]; then
     echo "frostfire: initializing a new database"
-    mariadb-install-db --user=mysql --datadir="$datadir" \
-        --auth-root-authentication-method=normal --skip-test-db >/dev/null
+    touch "$marker"
+    # --basedir is required on FreeBSD (the mysql-server rc script passes it too).
+    # The installer reports errors on stdout, so it's left visible.
+    mariadb-install-db --basedir=/usr/local --user=mysql --datadir="$datadir" \
+        --auth-root-authentication-method=normal --skip-test-db
 
     "$server" "$@" --skip-networking &
     pid=$!
@@ -53,6 +63,8 @@ FLUSH PRIVILEGES;
 SQL
     MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb-admin -uroot shutdown
     wait "$pid" || true
+    rm -f "$marker"
+    echo "frostfire: database initialized"
 fi
 
 export MYSQL_PWD="$MARIADB_ROOT_PASSWORD"
