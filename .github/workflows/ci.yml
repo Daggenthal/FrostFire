@@ -57,7 +57,7 @@ jobs:
       - name: Build
         run: go build -o frostfire ./cmd/frostfire && sudo install -m 755 frostfire /usr/local/bin/frostfire
       - name: End to end (Docker)
-        run: sudo FROSTFIRE_ENGINE=docker sh ci/e2e.sh
+        run: sudo FROSTFIRE_ENGINE=docker sh ci/run-e2e.sh
 
   # The same test inside a real FreeBSD VM, with Podman, pf and FreeBSD-native images.
   e2e-freebsd:
@@ -78,4 +78,4 @@ jobs:
             set -e
             go test -count=1 ./...
             go build -o /usr/local/bin/frostfire ./cmd/frostfire
-            sh ci/e2e.sh
+            sh ci/run-e2e.sh

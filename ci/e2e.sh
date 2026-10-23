@@ -18,11 +18,15 @@ dump_logs() {
 }
 trap 'test $? -eq 0 || dump_logs' EXIT
 
+# Checkpoints show up as annotations on the CI run.
+checkpoint() { echo "::notice title=e2e $(uname -s)::$*"; }
+
 # --- prerequisites, twice: the second run must be a no-op
 frostfire setup --dry-run
 frostfire setup --yes
 frostfire setup --yes | tee /tmp/setup-again.txt
 grep -q "Everything is already in place" /tmp/setup-again.txt
+checkpoint "setup ok, second run was a no-op"
 
 # --- install
 frostfire init
@@ -35,6 +39,7 @@ RESTIC_REPOSITORY=/var/backups/frostfire-ci
 EOF
 [ -n "${FROSTFIRE_ENGINE:-}" ] && echo "FROSTFIRE_ENGINE=$FROSTFIRE_ENGINE" >> "$ROOT/frostfire.env"
 frostfire repo init
+checkpoint "init and repo init ok"
 
 cat > "$ROOT/www/index.php" <<'EOF'
 <?php
@@ -63,6 +68,7 @@ grep -q "db: reachable" /tmp/php.txt
 grep -q "cache: reachable" /tmp/php.txt
 grep -q "mysqli: yes" /tmp/php.txt
 grep -q "memcached: yes" /tmp/php.txt
+checkpoint "stack up, PHP reaches db and cache by name"
 
 # --- nginx answers on port 80 (bootstrap mode: 503 until a cert exists)
 case "$(uname -s)" in
@@ -76,6 +82,7 @@ until [ "$(curl -s -o /dev/null -w '%{http_code}' "http://$ip/")" = "503" ]; do
     sleep 2
 done
 curl -s -H 'Host: ci.example.org' "http://$ip/.well-known/acme-challenge/missing" -o /dev/null -w '%{http_code}\n' | grep -q 404
+checkpoint "nginx answering on port 80"
 
 # --- data to protect
 printf 'CREATE DATABASE ci_marker;\nCREATE TABLE ci_marker.t (v VARCHAR(20));\nINSERT INTO ci_marker.t VALUES ("frostfire-ok");\n' > /tmp/seed.sql
@@ -89,6 +96,7 @@ echo 'DROP DATABASE ci_marker;' > /tmp/drop.sql
 frostfire db load /tmp/drop.sql --yes
 frostfire db dump /tmp/broken.sql
 ! grep -q frostfire-ok /tmp/broken.sql
+checkpoint "backup done, site and database broken on purpose"
 
 # --- restore and check
 frostfire restore latest --yes
@@ -98,8 +106,9 @@ until frostfire db dump /tmp/restored.sql 2>/dev/null; do
     i=$((i + 1)); [ "$i" -gt 30 ] && exit 1; sleep 5
 done
 grep -q frostfire-ok /tmp/restored.sql
+checkpoint "restore brought back files and database"
 
 frostfire prune
 frostfire repo check
 frostfire doctor || true   # the only expected failure is the missing TLS certificate
-echo "E2E PASSED on $(uname -sr)"
+checkpoint "E2E PASSED on $(uname -sr)"
