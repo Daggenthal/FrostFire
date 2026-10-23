@@ -4,6 +4,8 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: "17 9 * * 1"  # FreeBSD end to end, weekly
 
 jobs:
   test:
@@ -60,8 +62,11 @@ jobs:
         run: sudo FROSTFIRE_ENGINE=docker sh ci/run-e2e.sh
 
   # The same test inside a real FreeBSD VM, with Podman, pf and FreeBSD-native images.
+  # It runs nested inside GitHub's own VM and builds every image from scratch, which
+  # takes 45+ minutes, so it runs on demand and weekly rather than on every push.
   e2e-freebsd:
     needs: test
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 130
     steps:
