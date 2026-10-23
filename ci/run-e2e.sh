@@ -4,7 +4,7 @@
 # printed, and on failure its tail is also posted as a GitHub annotation, so it can be
 # read without downloading the job log.
 log=/tmp/frostfire-e2e.log
-timeout -k 30 6600 sh "$(dirname "$0")/e2e.sh" > "$log" 2>&1
+timeout -k 30 4500 sh "$(dirname "$0")/e2e.sh" > "$log" 2>&1
 rc=$?
 cat "$log"
 if [ "$rc" != 0 ]; then

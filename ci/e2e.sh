@@ -14,12 +14,18 @@ compose() {
 }
 
 dump_logs() {
-    set +e
+    set +ex
+    echo "=== containers ==="
     timeout 60 "$ENGINE" ps -a
-    compose 120 logs --tail 40
+    echo "=== container logs ==="
+    compose 120 logs --tail 15
+    if [ -f /tmp/up.log ]; then
+        echo "=== last lines of frostfire up ==="
+        tail -n 40 /tmp/up.log
+    fi
     if [ -f /tmp/ps-during-up.txt ]; then
-        echo "=== processes 4 minutes after frostfire up started the stack ==="
-        cat /tmp/ps-during-up.txt
+        echo "=== processes (latest snapshot during up) ==="
+        grep -vE 'sleep|ps -axww|\[' /tmp/ps-during-up.txt | tail -n 40
     fi
 }
 trap 'test $? -eq 0 || dump_logs' EXIT
@@ -61,20 +67,15 @@ echo 'mysqli: ', extension_loaded('mysqli') ? 'yes' : 'no', "\n";
 echo 'memcached: ', extension_loaded('memcached') ? 'yes' : 'no', "\n";
 EOF
 
-# If `up` gets stuck after the image builds, this snapshot shows what it's waiting on.
-(
-    until grep -q "Starting the stack" /tmp/up.log 2>/dev/null; do sleep 10; done
-    sleep 240
-    ps -axww -o pid,ppid,stat,etime,command > /tmp/ps-during-up.txt 2>&1
-) &
+# While `up` runs, keep a fresh process snapshot so a stall can be diagnosed.
+( set +x; while :; do ps -axww -o pid,ppid,stat,etime,command > /tmp/ps-during-up.txt 2>&1; sleep 120; done ) &
 watch=$!
-# Building the FreeBSD images in a nested VM is slow, so `up` gets a generous limit.
-if ! t 4200 frostfire up > /tmp/up.log 2>&1; then
-    cat /tmp/up.log
+if ! t 3000 frostfire up > /tmp/up.log 2>&1; then
+    kill "$watch" 2>/dev/null || true
     exit 1
 fi
-cat /tmp/up.log
 kill "$watch" 2>/dev/null || true
+tail -n 30 /tmp/up.log
 checkpoint "frostfire up finished"
 compose 60 ps
 
